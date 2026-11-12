@@ -1,0 +1,72 @@
+name: Build APK from ZIP
+
+# Repo mein sirf emoji-apk.zip aur yeh file chahiye.
+# Zip push karte hi (ya Run workflow dabate hi) APK ban jaata hai.
+on:
+  push:
+    paths:
+      - "emoji-apk.zip"
+      - ".github/workflows/build-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          mkdir -p _src
+          unzip -q emoji-apk.zip -d _src
+          PKG=$(find _src -name package.json -not -path "*/node_modules/*" | head -n 1)
+          if [ -z "$PKG" ]; then echo "package.json nahi mila zip ke andar"; exit 1; fi
+          echo "APP_DIR=$(dirname "$PKG")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: npm install
+
+      - name: Add Android platform
+        working-directory: ${{ env.APP_DIR }}
+        run: npx cap add android
+
+      - name: Sync web files into Android
+        working-directory: ${{ env.APP_DIR }}
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: ${{ env.APP_DIR }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Collect APK
+        run: cp "${{ env.APP_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk" emoji-maker.apk
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emoji-maker-apk
+          path: emoji-maker.apk
+
+      # Phone se download karna aasaan ho, isliye Releases mein bhi daal do
+      - name: Publish APK in Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Emoji Maker APK #${{ github.run_number }}
+          files: emoji-maker.apk
+
